@@ -1,5 +1,4 @@
 ; Copyright (c) http://www.bifferos.com
-; Redistribution strictly prohibited.
 
 %include "setup.i"
 
