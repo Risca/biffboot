@@ -56,6 +56,14 @@ u32 config_kernelmax_get(void);
 #define CONFIG_BUTTON_FORCEDON 2
 int config_button_get(void);
 
+#define CONFIG_UPGRADE_NOT_AVAILABLE 0
+#define CONFIG_UPGRADE_AVAILABLE     1
+int config_upgrade_available_get(void);
+
+int config_bootcount_get(void);
+// returns -1 for config version 1
+int config_boot_part_get(void);
+
 void config_setdefaults(const char*);
 void config_set_value(const char* arg);
 

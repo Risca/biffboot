@@ -19,6 +19,7 @@ struct _cfg
 
 struct _cfg_vals
 {
+  // v1
   int version;       // one for first version
   u8 bootsource;   // 0=flash, 1=MMC 2=NET 3=USB  (0)
   u8 console; // 0 = no console output (console input disabled if button enabled), 1= console output (1)
@@ -28,6 +29,10 @@ struct _cfg_vals
   char cmndline[1024];  // null term, 1023 chars max
   unsigned short kernelmax;  // counted in sectors
   u8 button;             // 1=enabled, 0=disabled
+  // v2
+  u8 upgrade_available;
+  u8 bootcount;
+  u8 boot_part;
 }  __attribute__((__packed__));
 
 
@@ -53,6 +58,7 @@ typedef struct _cfg_opt_hex
 #define CONFIG_TYPE_STRING 1   // always 1024 bytes
 #define CONFIG_TYPE_MEMADDR 2
 #define CONFIG_TYPE_SECTOR 3
+#define CONFIG_TYPE_BYTE 4
 
 
 typedef struct _cfg_value
@@ -122,6 +128,24 @@ static struct _cfg_opt_enum config_button_opts[] = {
   {0, (const char*)NULL}
 };
 
+static struct _cfg_opt_enum config_upgrade_opts[] = {
+  {CONFIG_UPGRADE_NOT_AVAILABLE, "Upgrade NOT in progress"},
+  {CONFIG_UPGRADE_AVAILABLE, "Upgrade in progress"},
+  {0, (const char*)NULL}
+};
+
+static struct _cfg_opt_hex config_bootcount_opts = {
+  min : 0x0,
+  max : 0x3,
+  step : 0x1,
+};
+
+static struct _cfg_opt_hex config_boot_part_opts = {
+  min : 0x0,
+  max : 0xff,
+  step : 0x1,
+};
+
 
 #define PV(n) ((void*)(n))
 
@@ -141,8 +165,14 @@ static struct _cfg_value config_values[] = {
     (u32)"", 0},
   {"kernelmax",  "The number of 0x10000-byte sectors taken up by the kernel",
   CONFIG_TYPE_SECTOR,  PV(&config_kernelmax_opts), 0x10, 0},
-  {"button",        "Whether the button triggers UDP flashing mode on power-on",
+  {"button",     "Whether the button triggers UDP flashing mode on power-on",
   CONFIG_TYPE_ENUM, PV(config_button_opts), 1, 0},
+  {"upgrade",    "Whether upgrade is in progress",
+  CONFIG_TYPE_ENUM, PV(config_upgrade_opts), CONFIG_UPGRADE_NOT_AVAILABLE, 0},
+  {"bootcount",  "Incremented when upgrade_available == 1",
+  CONFIG_TYPE_BYTE, PV(&config_bootcount_opts), 0, 0},
+  {"boot_part",  "Boot partition index",
+  CONFIG_TYPE_BYTE, PV(&config_boot_part_opts), 1, 0},
   {(const char*)NULL,  (const char*)NULL, 0,  NULL, 0, 0},
 };
 
@@ -199,6 +229,7 @@ u32 config_type_size(u8 cfg_type)
   switch(cfg_type)
   {
     case CONFIG_TYPE_ENUM:
+    case CONFIG_TYPE_BYTE:
       return 1;
     case CONFIG_TYPE_STRING:
       return 1024;
@@ -214,6 +245,7 @@ u32 config_type_size(u8 cfg_type)
 // Iterate the configuration values
 static _cfg_value_t* g_current_value;
 static u32 g_current_offset;
+static const u32 g_v2_offset = (u32)(&((struct _cfg_vals *)NULL)->upgrade_available);
 
 void config_iter_start()
 {
@@ -223,6 +255,9 @@ void config_iter_start()
 
 _cfg_value_t* config_iter_next()
 {
+  if (g_vals->version == 1 && g_current_offset >= g_v2_offset)
+    return (_cfg_value_t*)NULL;
+
   _cfg_value_t* tmp = g_current_value;
   g_current_value++;
   if (tmp->name)
@@ -242,6 +277,7 @@ void config_set_default(_cfg_value_t* val)
   switch (val->type)
   {
     case CONFIG_TYPE_ENUM:
+    case CONFIG_TYPE_BYTE:
       *ptr = val->initial & 0xff;
       return;
     case CONFIG_TYPE_STRING:
@@ -301,6 +337,41 @@ void config_adjust_for_flashmap()
     }
 }
 
+static void config_adjust_cmndline(void)
+{
+  // Ensure cmndline terminated properly in case someone wrote garbage
+  u32 i;
+  for (i=0;i<sizeof(g_vals->cmndline);i++)
+  {
+    if (!(g_vals->cmndline[i]))
+    {
+      break;
+    }
+  }
+  if ((i+1)==sizeof(g_vals->cmndline))
+  {
+    print_biffboot("cmndline found without termination, adding it\n");
+    g_vals->cmndline[i] = 0;
+  }
+  if (g_vals->version >= 2) {
+    char* ptr = g_vals->cmndline;
+    while (*ptr != '\0') {
+      if (!strncmp(ptr, "root=", 5))
+        break;
+      ptr++;
+    }
+    if (ptr != '\0') {
+      char rest[sizeof(g_vals->cmndline)];
+      // find end of root= argument
+      while (*ptr != ' ' && *ptr != '\0')
+        ptr++;
+      strcpy(rest, ptr);
+      // append boot_part to root argument
+      *ptr++ = '0' + g_vals->boot_part;
+      strcpy(ptr, rest);
+    }
+  }
+}
 
 // initialise config system, loading config from flash.
 void config_init()
@@ -334,21 +405,8 @@ void config_init()
     // enable on upgrade
     g_vals->button = 1;
   }
-  // Ensure cmndline terminated properly in case someone wrote garbage
-  u32 i;
-  for (i=0;i<sizeof(g_vals->cmndline);i++)
-  {
-    if (!(g_vals->cmndline[i]))
-    {
-      break;
-    }
-  }
-  if ((i+1)==sizeof(g_vals->cmndline)) 
-  {
-    print_biffboot("cmndline found without termination, adding it\n");
-    g_vals->cmndline[i] = 0;
-  }
 
+  config_adjust_cmndline();
   config_kernelmax_check(1);
   
   // take backup for last written comparison
@@ -459,6 +517,9 @@ void config_show_value(_cfg_value_t* val, int pad)
   {
     case CONFIG_TYPE_ENUM:
       config_enum_dump((_cfg_opt_enum_t*)val->typeinfo, *ptr);
+      break;
+    case CONFIG_TYPE_BYTE:
+      printf("%d", *ptr & 0xff);
       break;
     case CONFIG_TYPE_STRING:
       printf((char*)ptr);
@@ -636,6 +697,21 @@ int config_button_get()
   return g_vals->button;
 }
 
+int config_upgrade_available_get(void)
+{
+  return g_vals->version == 1 ? 0 : g_vals->upgrade_available;
+}
+
+int config_bootcount_get(void)
+{
+  return g_vals->version == 1 ? 0 : g_vals->bootcount;
+}
+
+int config_boot_part_get(void)
+{
+  return g_vals->version == 1 ? -1 : g_vals->boot_part;
+}
+
 
 // Set an individual config value
 void config_set_value(const char* arg)
@@ -679,6 +755,9 @@ void config_set_value(const char* arg)
           return;
         case CONFIG_TYPE_SECTOR:
           config_hex_set(val, 16, KERNELMAX_MAX);
+          return;
+        case CONFIG_TYPE_BYTE:
+          config_hex_set(val, 8, 0xff);
           return;
       }
       break;
