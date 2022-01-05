@@ -20,7 +20,7 @@ extern u32 FLASHMAP_CHUNK_COUNT;
 // flash detection codes.
 #define FLASH_CODE_EN800 (0x7f1c225b)
 #define FLASH_CODE_EN320 (0x7f1c22f9)
-#define FLASH_CODE_EN640 (0x7f1c00cb)
+#define FLASH_CODE_EN640 (0x7f1c22cb)
 
 
 // the flash detected during init.
