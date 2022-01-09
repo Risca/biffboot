@@ -298,6 +298,8 @@ void config_setdefaults(const char*)
 {
   _cfg_value_t* val;
 
+  g_vals->version = 2;
+
   config_iter_start();
   while ((val = config_iter_next()))
     config_set_default(val);
@@ -541,6 +543,7 @@ void config_dump(const char* arg)
   _cfg_value_t* val;
 
   printf("Configuration values:\n");
+  printf("version:     %d\n", g_vals->version);
   config_iter_start();
   while ((val = config_iter_next()))
     config_show_value(val, 1);
@@ -724,6 +727,8 @@ void config_set_value(const char* arg)
   if (ptr)
   {
     printf("Available config options:\n");
+    printf("defaults\n");
+    printf("OR\n");
     config_iter_start();
     while ((val = config_iter_next()))
     {
@@ -733,6 +738,13 @@ void config_set_value(const char* arg)
       printf(val->description);
       printf("\n");
     }
+    return;
+  }
+
+  ptr = eat_token(arg, "defaults");
+  if (ptr)
+  {
+    config_setdefaults("");
     return;
   }
 
