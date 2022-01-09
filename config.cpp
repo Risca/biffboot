@@ -364,12 +364,26 @@ static void config_adjust_cmndline(void)
     }
     if (ptr != '\0') {
       char rest[sizeof(g_vals->cmndline)];
+      char *partition;
+      const char *end = &g_vals->cmndline[sizeof(g_vals->cmndline) - 1];
+
+      // find partition
+      while ((*ptr < '1' || *ptr > '9') && *ptr != ' ' && *ptr != '\0')
+        ptr++;
+      partition = ptr;
       // find end of root= argument
       while (*ptr != ' ' && *ptr != '\0')
         ptr++;
+      if (partition + (end - ptr) + 1 > end) {
+        print_biffboot("Adjusting cmndline would write out of bounds!\n");
+        return;
+      }
       strcpy(rest, ptr);
+      // seek back to partition
+      ptr = partition;
       // append boot_part to root argument
       *ptr++ = '0' + g_vals->boot_part;
+      *ptr = '\0'; // safety precaution
       strcpy(ptr, rest);
     }
   }
